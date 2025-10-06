@@ -48,12 +48,10 @@ if (!defined('ABSPATH')) exit;
                     $sujets = esc_html($data[6]);
                     $created = isset($data[7]) ? esc_html($data[7]) : 'N/A';
 
-                    $delete_url = esc_url(add_query_arg(array(
-                        'page' => 'reservations-admin',
-                        'action' => 'delete_reservation',
-                        'id' => $global_index,
-                        '_wpnonce' => wp_create_nonce('delete_reservation_' . $global_index)
-                    ), admin_url('admin.php')));
+                    $delete_url = esc_url(wp_nonce_url(add_query_arg(array(
+                        'action' => 'reservations_delete_reservation',
+                        'id'     => $global_index
+                    ), admin_url('admin-post.php')), 'delete_reservation_' . $global_index));
                 ?>
                     <tr>
                         <td><strong><?php echo $date; ?></strong></td>

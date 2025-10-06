@@ -48,10 +48,9 @@ if (!defined('ABSPATH')) exit;
                     $heure = esc_html($data[1]);
 
                     $delete_url = esc_url(wp_nonce_url(add_query_arg(array(
-                        'page' => 'reservations-bloques',
-                        'action' => 'delete_bloque',
-                        'id' => $index
-                    ), admin_url('admin.php')), 'delete_bloque_' . $index));
+                        'action' => 'reservations_delete_blocked_slot',
+                        'id'     => $index
+                    ), admin_url('admin-post.php')), 'delete_blocked_slot_' . $index));
                 ?>
                     <tr>
                         <td><strong><?php echo $date; ?></strong></td>

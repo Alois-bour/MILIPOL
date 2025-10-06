@@ -378,7 +378,7 @@ final class ReservationsPlugin {
 
     public function handle_delete_blocked_slot() {
         $id = isset($_GET['id']) ? intval($_GET['id']) : -1;
-        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_bloque_' . $id)) {
+        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_blocked_slot_' . $id)) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
         $this->delete_line_from_file($this->bloques_file, $id);
@@ -400,7 +400,7 @@ final class ReservationsPlugin {
 
     public function handle_delete_subject() {
         $id = isset($_GET['id']) ? intval($_GET['id']) : -1;
-        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_sujet_' . $id)) {
+        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_subject_' . $id)) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
         $this->delete_line_from_file($this->sujets_file, $id);

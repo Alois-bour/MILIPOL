@@ -41,10 +41,9 @@ if (!defined('ABSPATH')) exit;
 
                     $sujet = esc_html($data[0]);
                     $delete_url = esc_url(wp_nonce_url(add_query_arg(array(
-                        'page' => 'reservations-sujets',
-                        'action' => 'delete_sujet',
-                        'id' => $index
-                    ), admin_url('admin.php')), 'delete_sujet_' . $index));
+                        'action' => 'reservations_delete_subject',
+                        'id'     => $index
+                    ), admin_url('admin-post.php')), 'delete_subject_' . $index));
                 ?>
                     <tr>
                         <td><strong><?php echo $sujet; ?></strong></td>
