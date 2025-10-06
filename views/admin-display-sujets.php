@@ -19,10 +19,7 @@ if (!defined('ABSPATH')) exit;
         </form>
     </div>
 
-    <?php
-    $sujets = $this->get_sujets(false); // get all, not just defaults
-    if (!empty($sujets)) :
-    ?>
+    <?php if (!empty($subjects)) : ?>
         <h2><?php echo esc_html__('Sujets actuellement disponibles', 'reservations-personnalise'); ?></h2>
         <table class="wp-list-table widefat fixed striped">
             <thead>
@@ -32,21 +29,14 @@ if (!defined('ABSPATH')) exit;
                 </tr>
             </thead>
             <tbody>
-                <?php
-                // We need the raw lines to get the index for deletion
-                $lines = file_exists($this->sujets_file) ? file($this->sujets_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) : array();
-                foreach ($lines as $index => $line) :
-                    $data = str_getcsv($line);
-                    if (empty($data[0])) continue;
-
-                    $sujet = esc_html($data[0]);
+                <?php foreach ($subjects as $subject) :
                     $delete_url = esc_url(wp_nonce_url(add_query_arg(array(
                         'action' => 'reservations_delete_subject',
-                        'id'     => $index
-                    ), admin_url('admin-post.php')), 'delete_subject_' . $index));
+                        'id'     => $subject->id
+                    ), admin_url('admin-post.php')), 'delete_subject_' . $subject->id));
                 ?>
                     <tr>
-                        <td><strong><?php echo $sujet; ?></strong></td>
+                        <td><strong><?php echo esc_html($subject->sujet); ?></strong></td>
                         <td>
                             <a href="<?php echo $delete_url; ?>" onclick="return confirm('<?php echo esc_js(__('Supprimer ce sujet ?', 'reservations-personnalise')); ?>');" class="button button-small">
                                 ❌ <?php esc_html_e('Supprimer', 'reservations-personnalise'); ?>

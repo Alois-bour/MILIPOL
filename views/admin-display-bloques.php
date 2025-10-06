@@ -26,10 +26,7 @@ if (!defined('ABSPATH')) exit;
         </form>
     </div>
 
-    <?php
-    $lines = $this->get_file_content($this->bloques_file);
-    if (!empty($lines)) :
-    ?>
+    <?php if (!empty($blocked_slots)) : ?>
         <h2><?php echo esc_html__('Créneaux actuellement bloqués', 'reservations-personnalise'); ?></h2>
         <table class="wp-list-table widefat fixed striped">
             <thead>
@@ -40,21 +37,15 @@ if (!defined('ABSPATH')) exit;
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($lines as $index => $line) :
-                    $data = str_getcsv($line);
-                    if (count($data) < 2) continue;
-
-                    $date = esc_html($data[0]);
-                    $heure = esc_html($data[1]);
-
+                <?php foreach ($blocked_slots as $slot) :
                     $delete_url = esc_url(wp_nonce_url(add_query_arg(array(
                         'action' => 'reservations_delete_blocked_slot',
-                        'id'     => $index
-                    ), admin_url('admin-post.php')), 'delete_blocked_slot_' . $index));
+                        'id'     => $slot->id
+                    ), admin_url('admin-post.php')), 'delete_blocked_slot_' . $slot->id));
                 ?>
                     <tr>
-                        <td><strong><?php echo $date; ?></strong></td>
-                        <td><?php echo $heure; ?></td>
+                        <td><strong><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($slot->blocked_date))); ?></strong></td>
+                        <td><?php echo esc_html(date_i18n(get_option('time_format'), strtotime($slot->blocked_time))); ?></td>
                         <td>
                             <a href="<?php echo $delete_url; ?>" onclick="return confirm('<?php echo esc_js(__('Débloquer ce créneau ?', 'reservations-personnalise')); ?>');" class="button button-small">
                                 ✅ <?php esc_html_e('Débloquer', 'reservations-personnalise'); ?>

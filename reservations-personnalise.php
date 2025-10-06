@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: Custom Reservations (Enhanced Version)
- * Description: A comprehensive booking plugin with slot management, HTML notifications, activity logging, and a responsive design.
- * Version: 4.0
+ * Plugin Name: Custom Reservations (Database Version)
+ * Description: A comprehensive booking plugin using the WordPress database for storage, with slot management, notifications, and logging.
+ * Version: 5.0
  * Author: Jules (Enhanced by AI)
  * Text Domain: reservations-personnalise
  * Domain Path: /languages
@@ -19,10 +19,11 @@ final class ReservationsPlugin {
 
     private static $instance = null;
 
-    private $upload_dir;
-    private $reservations_file;
-    private $bloques_file;
-    private $sujets_file;
+    // Table names
+    public $table_reservations;
+    public $table_blocked_slots;
+    public $table_subjects;
+
     private $log_file;
     private $per_page = 20;
 
@@ -37,19 +38,20 @@ final class ReservationsPlugin {
     }
 
     private function __construct() {
+        global $wpdb;
+        $this->table_reservations = $wpdb->prefix . 'reservations_plugin';
+        $this->table_blocked_slots = $wpdb->prefix . 'reservations_blocked_slots';
+        $this->table_subjects = $wpdb->prefix . 'reservations_subjects';
+
         $upload = wp_upload_dir();
-        $this->upload_dir = $upload['basedir'] . '/reservations-plugin';
-        $this->reservations_file = $this->upload_dir . "/reservations.csv";
-        $this->bloques_file = $this->upload_dir . "/bloques.csv";
-        $this->sujets_file = $this->upload_dir . "/sujets.csv";
-        $this->log_file = $this->upload_dir . "/activity.log";
+        $this->log_file = $upload['basedir'] . '/reservations-plugin/activity.log';
 
         $this->init_hooks();
     }
 
     private function init_hooks() {
-        // Activation hook for storage setup
-        register_activation_hook(__FILE__, array($this, 'ensure_storage_ready'));
+        // Activation hook for database setup
+        register_activation_hook(__FILE__, array($this, 'install_database'));
 
         add_action('init', array($this, 'load_textdomain'));
         add_action('admin_init', array($this, 'register_settings'));
@@ -84,32 +86,55 @@ final class ReservationsPlugin {
         load_plugin_textdomain('reservations-personnalise', false, dirname(plugin_basename(__FILE__)) . '/languages');
     }
 
-    public function ensure_storage_ready() {
-        if (!file_exists($this->upload_dir)) {
-            wp_mkdir_p($this->upload_dir);
-        }
-        $files_to_check = array(
-            $this->reservations_file,
-            $this->bloques_file,
-            $this->sujets_file,
-            $this->log_file
-        );
-        foreach ($files_to_check as $file) {
-            if (!file_exists($file)) {
-                $handle = @fopen($file, 'w');
-                if ($handle) {
-                    fclose($handle);
-                }
-            }
-        }
-        if (file_exists($this->sujets_file) && filesize($this->sujets_file) === 0) {
+    public function install_database() {
+        global $wpdb;
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql_reservations = "CREATE TABLE {$this->table_reservations} (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            reservation_date date NOT NULL,
+            reservation_time time NOT NULL,
+            nom varchar(100) NOT NULL,
+            prenom varchar(100) NOT NULL,
+            entite varchar(100) NOT NULL,
+            email varchar(100) NOT NULL,
+            sujets text NOT NULL,
+            created_at datetime NOT NULL,
+            PRIMARY KEY  (id),
+            UNIQUE KEY unique_slot (reservation_date, reservation_time)
+        ) $charset_collate;";
+        dbDelta($sql_reservations);
+
+        $sql_blocked_slots = "CREATE TABLE {$this->table_blocked_slots} (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            blocked_date date NOT NULL,
+            blocked_time time NOT NULL,
+            PRIMARY KEY  (id),
+            UNIQUE KEY unique_blocked_slot (blocked_date, blocked_time)
+        ) $charset_collate;";
+        dbDelta($sql_blocked_slots);
+
+        $sql_subjects = "CREATE TABLE {$this->table_subjects} (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            sujet varchar(255) NOT NULL,
+            PRIMARY KEY  (id),
+            UNIQUE KEY sujet (sujet)
+        ) $charset_collate;";
+        dbDelta($sql_subjects);
+
+        // Add default subjects if the table is empty
+        $this->add_default_subjects();
+    }
+
+    private function add_default_subjects() {
+        global $wpdb;
+        $count = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_subjects}");
+        if ($count == 0) {
             $defaults = array('Consultation générale', 'Rendez-vous de suivi', 'Première visite', 'Urgence');
-            $handle = fopen($this->sujets_file, 'w');
-            if ($handle) {
-                foreach ($defaults as $default) {
-                    fputcsv($handle, array($default));
-                }
-                fclose($handle);
+            foreach ($defaults as $sujet) {
+                $wpdb->insert($this->table_subjects, array('sujet' => $sujet), array('%s'));
             }
         }
     }
@@ -158,49 +183,45 @@ final class ReservationsPlugin {
         return array("09:00", "10:00", "11:00", "14:00", "15:00", "16:00");
     }
 
-    public function get_file_content($filepath) {
-        if (!file_exists($filepath)) {
-            return [];
-        }
-        return file($filepath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    }
 
     public function get_sujets() {
-        $sujets = array();
-        $lines = $this->get_file_content($this->sujets_file);
-        foreach ($lines as $line) {
-            $data = str_getcsv($line);
-            if (!empty($data[0])) {
-                $sujets[] = $data[0];
-            }
+        global $wpdb;
+        $results = $wpdb->get_col("SELECT sujet FROM {$this->table_subjects} ORDER BY sujet ASC");
+        if (empty($results)) {
+            return array(__('Consultation générale', 'reservations-personnalise'));
         }
-        return empty($sujets) ? array(__('Consultation générale', 'reservations-personnalise')) : $sujets;
+        return $results;
     }
 
     private function get_bloques() {
-        $bloques = array();
-        $lines = $this->get_file_content($this->bloques_file);
-        foreach ($lines as $line) {
-            $data = str_getcsv($line);
-            if (count($data) >= 2) {
-                $bloques[] = $data[0] . "_" . $data[1];
-            }
-        }
-        return $bloques;
+        global $wpdb;
+        // This function will be used by the admin page to display blocked slots.
+        return $wpdb->get_results("SELECT id, blocked_date, blocked_time FROM {$this->table_blocked_slots} ORDER BY blocked_date, blocked_time");
     }
 
     private function is_slot_available($date, $heure) {
-        if (in_array($date . "_" . $heure, $this->get_bloques(), true)) {
+        global $wpdb;
+        $heure_with_seconds = $heure . ':00';
+
+        // Check for an existing reservation
+        $reservation = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_reservations} WHERE reservation_date = %s AND reservation_time = %s",
+            $date,
+            $heure_with_seconds
+        ));
+
+        if ($reservation > 0) {
             return false;
         }
-        $lines = $this->get_file_content($this->reservations_file);
-        foreach ($lines as $line) {
-            $data = str_getcsv($line);
-            if (count($data) >= 2 && $data[0] === $date && $data[1] === $heure) {
-                return false;
-            }
-        }
-        return true;
+
+        // Check for a blocked slot
+        $blocked = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_blocked_slots} WHERE blocked_date = %s AND blocked_time = %s",
+            $date,
+            $heure_with_seconds
+        ));
+
+        return $blocked == 0;
     }
 
     public function render_form() {
@@ -256,24 +277,32 @@ final class ReservationsPlugin {
     }
 
     private function save_reservation($data) {
-        $handle = fopen($this->reservations_file, 'a');
-        if (!$handle || !flock($handle, LOCK_EX)) {
-            return false;
-        }
-        $line = array(
-            $data['date'],
-            $data['heure'],
-            $data['nom'],
-            $data['prenom'],
-            $data['entite'],
-            $data['email'],
-            implode(', ', $data['sujets']),
-            current_time('mysql')
+        global $wpdb;
+
+        $result = $wpdb->insert(
+            $this->table_reservations,
+            array(
+                'reservation_date' => $data['date'],
+                'reservation_time' => $data['heure'],
+                'nom'              => $data['nom'],
+                'prenom'           => $data['prenom'],
+                'entite'           => $data['entite'],
+                'email'            => $data['email'],
+                'sujets'           => implode(', ', $data['sujets']),
+                'created_at'       => current_time('mysql'),
+            ),
+            array(
+                '%s', // reservation_date
+                '%s', // reservation_time
+                '%s', // nom
+                '%s', // prenom
+                '%s', // entite
+                '%s', // email
+                '%s', // sujets
+                '%s', // created_at
+            )
         );
-        $result = fputcsv($handle, $line);
-        fflush($handle);
-        flock($handle, LOCK_UN);
-        fclose($handle);
+
         return $result !== false;
     }
 
@@ -328,22 +357,34 @@ final class ReservationsPlugin {
 
     // --- Page Display Callbacks ---
     public function display_reservations_page() {
-        $total = count($this->get_file_content($this->reservations_file));
+        global $wpdb;
+
         $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
         $offset = ($paged - 1) * $this->per_page;
-        $lines = $this->get_file_content($this->reservations_file);
-        $page_lines = array_slice($lines, $offset, $this->per_page);
+
+        $total = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_reservations}");
         $total_pages = ceil($total / $this->per_page);
+
+        $reservations = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$this->table_reservations} ORDER BY reservation_date DESC, reservation_time DESC LIMIT %d OFFSET %d",
+            $this->per_page,
+            $offset
+        ));
+
         $export_url = esc_url(wp_nonce_url(admin_url('admin-post.php?action=reservations_export'), 'export_reservations'));
 
         include_once RESERVATIONS_PLUGIN_PATH . 'views/admin-display-reservations.php';
     }
 
     public function display_bloques_page() {
+        global $wpdb;
+        $blocked_slots = $wpdb->get_results("SELECT * FROM {$this->table_blocked_slots} ORDER BY blocked_date, blocked_time");
         include_once RESERVATIONS_PLUGIN_PATH . 'views/admin-display-bloques.php';
     }
 
     public function display_sujets_page() {
+        global $wpdb;
+        $subjects = $wpdb->get_results("SELECT * FROM {$this->table_subjects} ORDER BY sujet ASC");
         include_once RESERVATIONS_PLUGIN_PATH . 'views/admin-display-sujets.php';
     }
 
@@ -354,75 +395,109 @@ final class ReservationsPlugin {
     // --- admin-post handlers ---
 
     public function handle_delete_reservation() {
-        $id = isset($_GET['id']) ? intval($_GET['id']) : -1;
-        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_reservation_' . $id)) {
+        global $wpdb;
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+        if ($id <= 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_reservation_' . $id)) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
-        $this->delete_line_from_file($this->reservations_file, $id);
+
+        $wpdb->delete($this->table_reservations, array('id' => $id), array('%d'));
+
         add_settings_error('reservations', 'reservation_deleted', __('Réservation supprimée.', 'reservations-personnalise'), 'success');
         wp_safe_redirect(admin_url('admin.php?page=reservations-admin'));
         exit;
     }
 
     public function handle_add_blocked_slot() {
+        global $wpdb;
         if (!isset($_POST['add_blocked_nonce']) || !wp_verify_nonce($_POST['add_blocked_nonce'], 'add_blocked_slot')) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
         $date = sanitize_text_field($_POST['date']);
         $heure = sanitize_text_field($_POST['heure']);
-        $this->add_line_to_file($this->bloques_file, array($date, $heure));
+
+        if (!empty($date) && !empty($heure)) {
+            $wpdb->insert(
+                $this->table_blocked_slots,
+                array('blocked_date' => $date, 'blocked_time' => $heure),
+                array('%s', '%s')
+            );
+        }
+
         add_settings_error('reservations', 'slot_blocked', __('Créneau bloqué.', 'reservations-personnalise'), 'success');
         wp_safe_redirect(admin_url('admin.php?page=reservations-bloques'));
         exit;
     }
 
     public function handle_delete_blocked_slot() {
-        $id = isset($_GET['id']) ? intval($_GET['id']) : -1;
-        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_blocked_slot_' . $id)) {
+        global $wpdb;
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+        if ($id <= 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_blocked_slot_' . $id)) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
-        $this->delete_line_from_file($this->bloques_file, $id);
+
+        $wpdb->delete($this->table_blocked_slots, array('id' => $id), array('%d'));
+
         add_settings_error('reservations', 'slot_unblocked', __('Créneau débloqué.', 'reservations-personnalise'), 'success');
         wp_safe_redirect(admin_url('admin.php?page=reservations-bloques'));
         exit;
     }
 
     public function handle_add_subject() {
+        global $wpdb;
         if (!isset($_POST['add_subject_nonce']) || !wp_verify_nonce($_POST['add_subject_nonce'], 'add_subject')) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
         $sujet = sanitize_text_field($_POST['sujet']);
-        $this->add_line_to_file($this->sujets_file, array($sujet));
-        add_settings_error('reservations', 'subject_added', __('Sujet ajouté.', 'reservations-personnalise'), 'success');
+        if (!empty($sujet)) {
+            $wpdb->insert($this->table_subjects, array('sujet' => $sujet), array('%s'));
+            add_settings_error('reservations', 'subject_added', __('Sujet ajouté.', 'reservations-personnalise'), 'success');
+        } else {
+            add_settings_error('reservations', 'subject_error', __('Le sujet ne peut pas être vide.', 'reservations-personnalise'), 'error');
+        }
         wp_safe_redirect(admin_url('admin.php?page=reservations-sujets'));
         exit;
     }
 
     public function handle_delete_subject() {
-        $id = isset($_GET['id']) ? intval($_GET['id']) : -1;
-        if ($id < 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_subject_' . $id)) {
+        global $wpdb;
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+        if ($id <= 0 || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_subject_' . $id)) {
             wp_die(__('Security check failed.', 'reservations-personnalise'));
         }
-        $this->delete_line_from_file($this->sujets_file, $id);
+
+        $wpdb->delete($this->table_subjects, array('id' => $id), array('%d'));
+
         add_settings_error('reservations', 'subject_deleted', __('Sujet supprimé.', 'reservations-personnalise'), 'success');
         wp_safe_redirect(admin_url('admin.php?page=reservations-sujets'));
         exit;
     }
 
     public function handle_csv_export() {
+        global $wpdb;
         if (!current_user_can('manage_options') || !isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'export_reservations')) {
             wp_die(__('Access denied or security check failed.', 'reservations-personnalise'));
         }
+
+        $reservations = $wpdb->get_results("SELECT reservation_date, reservation_time, nom, prenom, entite, email, sujets, created_at FROM {$this->table_reservations} ORDER BY reservation_date ASC, reservation_time ASC", ARRAY_A);
+
+        if (empty($reservations)) {
+            wp_die(__('Aucune réservation à exporter', 'reservations-personnalise'));
+        }
+
         nocache_headers();
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename=reservations-' . date('Y-m-d') . '.csv');
         $output = fopen('php://output', 'w');
+
         fputs($output, "\xEF\xBB\xBF"); // UTF-8 BOM
+
         fputcsv($output, array('Date','Heure','Nom','Prénom','Entité','Email','Sujet(s)','Enregistré le'));
-        $lines = $this->get_file_content($this->reservations_file);
-        foreach ($lines as $line) {
-            fputcsv($output, str_getcsv($line));
+
+        foreach ($reservations as $reservation) {
+            fputcsv($output, $reservation);
         }
+
         fclose($output);
         exit;
     }
@@ -452,25 +527,6 @@ final class ReservationsPlugin {
         exit;
     }
 
-    // --- File manipulation helpers ---
-    private function delete_line_from_file($filepath, $line_index) {
-        if (!file_exists($filepath)) return;
-        $lines = file($filepath, FILE_IGNORE_NEW_LINES);
-        if (isset($lines[$line_index])) {
-            unset($lines[$line_index]);
-            file_put_contents($filepath, implode("\n", $lines) . "\n", LOCK_EX);
-        }
-    }
-
-    private function add_line_to_file($filepath, $data_array) {
-        $handle = fopen($filepath, 'a');
-        if ($handle && flock($handle, LOCK_EX)) {
-            fputcsv($handle, $data_array);
-            fflush($handle);
-            flock($handle, LOCK_UN);
-            fclose($handle);
-        }
-    }
 
     public function ajax_check_slot() {
         check_ajax_referer('reservations_check_slot');
