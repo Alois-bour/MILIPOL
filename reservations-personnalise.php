@@ -450,8 +450,12 @@ final class ReservationsPlugin {
         }
         $sujet = sanitize_text_field($_POST['sujet']);
         if (!empty($sujet)) {
-            $wpdb->insert($this->table_subjects, array('sujet' => $sujet), array('%s'));
-            add_settings_error('reservations', 'subject_added', __('Sujet ajouté.', 'reservations-personnalise'), 'success');
+            $result = $wpdb->insert($this->table_subjects, array('sujet' => $sujet), array('%s'));
+            if ($result === false) {
+                add_settings_error('reservations', 'subject_error', __('Erreur lors de l\'ajout du sujet. Il est possible qu\'il existe déjà.', 'reservations-personnalise'), 'error');
+            } else {
+                add_settings_error('reservations', 'subject_added', __('Sujet ajouté.', 'reservations-personnalise'), 'success');
+            }
         } else {
             add_settings_error('reservations', 'subject_error', __('Le sujet ne peut pas être vide.', 'reservations-personnalise'), 'error');
         }
